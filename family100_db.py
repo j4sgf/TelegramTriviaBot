@@ -154,16 +154,16 @@ def setup_database():
     print("Database berhasil dibuat dan diisi dengan pertanyaan serta jawaban!")
     
 
-def update_score(user_id: int, username: str, points: int):
+def update_persistent_score(user_id: int, username: str, points: int):
+    """Update the persistent (total) score in the database."""
     conn = sqlite3.connect("family100.db")
     cursor = conn.cursor()
 
-    # Insert or update the user's score
+    # Insert or update the user's persistent score
     cursor.execute("""
     INSERT INTO scores (user_id, username, points)
     VALUES (?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET
-    points = points + ?
+    ON CONFLICT(user_id) DO UPDATE SET points = points + ?
     """, (user_id, username, points, points))
 
     conn.commit()

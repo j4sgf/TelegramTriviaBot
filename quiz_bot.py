@@ -1,12 +1,13 @@
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, filters
-from family100_db import setup_database, get_family100_question, update_score, get_rankings
+from family100_db import setup_database, get_family100_question, update_persistent_score, get_rankings
 
 import random
 
 # Global dictionary to track active sessions per group
 group_sessions = {}
 user_scores = {}
+session_scores = {}
 
 async def start_game(update: Update, context: CallbackContext) -> None:
     group_id = update.effective_chat.id
@@ -54,7 +55,8 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         guessed_answers[user_answer] = username
 
         # Update user's score
-        update_score(update.effective_user.id, username, points)
+        update_session_score(update.effective_user.id, username, points)
+        update_persistent_score(update.effective_user.id, username, points)
 
         await update.message.reply_text(f"✅ {user_answer.capitalize()}! {points} poin!")
     else:
@@ -76,6 +78,7 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
 async def forfeit_game(update: Update, context: CallbackContext) -> None:
     group_id = update.effective_chat.id
+    username = update.effective_user.first_name or "Anonim" 
 
     if group_id not in group_sessions or not group_sessions[group_id]["is_active"]:
         await update.message.reply_text("Tidak ada permainan yang sedang berlangsung.")
@@ -85,18 +88,19 @@ async def forfeit_game(update: Update, context: CallbackContext) -> None:
     session = group_sessions[group_id]
     session["is_active"] = False
     answers = session["current_question"]["answers"]
-    await update.message.reply_text("❌ Permainan dihentikan.")
-    sorted_answers = sorted(answers.items(), key=lambda x: -x[1])
-    full_answer_message = "🔍 Jawaban Lengkap 🔍\n\n"
-    for answer, points in sorted_answers:
-        full_answer_message += f"{answer.capitalize()} ({points} poin)\n"
+    await update.message.reply_text(f"❌{username} nyerah! Permainan dihentikan.")
+    # sorted_answers = sorted(answers.items(), key=lambda x: -x[1])
+    # full_answer_message = "🔍 Jawaban Lengkap 🔍\n\n"
+    # for answer, points in sorted_answers:
+    #     full_answer_message += f"{answer.capitalize()} ({points} poin)\n"
 
-    await update.message.reply_text(full_answer_message)
+    # await update.message.reply_text(full_answer_message)
 
     # Remove the session
     del group_sessions[group_id]
 
-    await show_rankings(update)
+    await show_session_rankings(update)
+    clear_session_scores()
 
      # Ask if the user wants to play again
     await update.message.reply_text("Apakah kamu ingin bermain lagi? Ketik /mulai untuk memulai permainan baru.")
@@ -114,7 +118,8 @@ async def end_game(update: Update, group_id: int, guessed_answers: dict, answers
 
     await update.message.reply_text(full_answer_message)
 
-    await show_rankings(update)
+    await show_session_rankings(update)
+    clear_session_scores()
     del group_sessions[group_id]
 
 async def display_answers(update: Update, question_text: str, answers: dict, guessed_answers: dict) -> None:
@@ -131,17 +136,41 @@ async def display_answers(update: Update, question_text: str, answers: dict, gue
         "Jawaban sejauh ini:\n" + "\n".join(displayed_answers)
     )
 
+def update_session_score(user_id: int, username: str, points: int):
+    """Update the session score for the current game round."""
+    session_scores[user_id] = session_scores.get(user_id, 0) + points
+
 async def show_rankings(update: Update, context: CallbackContext) -> None:
     rankings = get_rankings()
     if not rankings:
         await update.message.reply_text("Belum ada pemain yang meraih poin.")
         return
 
-    ranking_message = "🏆 Peringkat Pemain 🏆\n\n"
+    ranking_message = "🏆 Daftar Jagoan 🏆\n\n"
     for i, (username, score) in enumerate(rankings, 1):
         ranking_message += f"{i}. {username} - {score} poin\n"
 
     await update.message.reply_text(ranking_message)
+
+async def show_session_rankings(update: Update) -> None:
+    sorted_scores = sorted(session_scores.items(), key=lambda x: -x[1])
+
+    if not sorted_scores:
+        await update.message.reply_text("Belum ada pemain yang mendapatkan poin di sesi ini.")
+        return
+
+    session_ranking_message = "🏆 Peringkat Sesi 🏆\n\n"
+    for i, (user_id, score) in enumerate(sorted_scores, 1):
+        # Await the get_member coroutine
+        member = await update.message.chat.get_member(user_id)
+        username = member.user.first_name
+        session_ranking_message += f"{i}. {username} - {score} poin\n"
+    
+    await update.message.reply_text(session_ranking_message) 
+
+def clear_session_scores():
+    """Clear session scores after the game ends."""
+    session_scores.clear()    
 
 def provide_hint(answer: str) -> str:
 
